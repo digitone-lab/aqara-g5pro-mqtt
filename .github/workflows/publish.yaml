@@ -17,21 +17,24 @@ permissions:
   packages: write
 
 jobs:
-  # 1. Home Assistant Add-on Multi-Arch Builder
+  # Build the Home Assistant add-on on GitHub, not on the memory-limited Pi.
+  # This experimental fork currently targets the user's aarch64 HA installation.
   publish-addon:
-    name: Build & Publish HA Add-on (${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
-          - arch: amd64
-            runner: ubuntu-24.04
+    name: Build & Publish HA Add-on (aarch64)
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Read add-on version
+        id: version
+        run: |
+          version=$(sed -n 's/^version: "\\([^"]*\\)"/\\1/p' app/config.yaml)
+          test -n "$version"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -40,15 +43,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & Publish Home Assistant Add-on Image
-        uses: home-assistant/builder@master
+      - name: Build and publish prebuilt add-on image
+        uses: docker/build-push-action@v6
         with:
-          image: ${{ matrix.arch }}
-          args: |
-            --${{ matrix.arch }} \
-            --target /data/app \
-            --image "aqara-g5pro-mqtt/{arch}" \
-            --docker-hub "ghcr.io/${{ github.repository_owner }}"
+          context: ./app
+          file: ./app/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/aqara-g5pro-mqtt:${{ steps.version.outputs.value }}
+          cache-from: type=gha,scope=aqara-ha-addon
+          cache-to: type=gha,mode=max,scope=aqara-ha-addon
 
   # 2. Standalone Multi-Arch Docker Image (for standalone Docker users)
   publish-standalone:
