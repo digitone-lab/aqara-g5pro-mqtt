@@ -1,19 +1,6 @@
 import type { MqttClient } from "mqtt";
 import type { MQTTDevice } from "./types.js";
 
-// Ordinary-motion names are experimental Aqara cloud-query candidates.
-// Their availability varies by camera/firmware and is verified from live results.
-export const MOTION_EVENT_ATTRS = [
-  "motion_detect_event",
-  "detect_motion_event",
-  "motion_event",
-  "motion_detection_event",
-  "detect_move_event",
-  "move_detect_event",
-  "movement_detect_event",
-  "detect_movement_event",
-];
-
 // AI event names previously supported by the bridge.
 export const EVENT_ATTRS = [
   "detect_human_event",
@@ -27,7 +14,7 @@ export const EVENT_ATTRS = [
   "person_detect_event",
 ];
 
-const ALL_EVENT_ATTRS = new Set([...EVENT_ATTRS, ...MOTION_EVENT_ATTRS]);
+const ALL_EVENT_ATTRS = new Set(EVENT_ATTRS);
 
 const RESET_SECONDS = Number(process.env.MOTION_RESET ?? 30);
 
@@ -93,6 +80,15 @@ export function processEventAttrs(
     return;
   }
 
+  activateMotion(client, mqttDevice, changedAttr);
+}
+
+/** Shared output path for native human and ordinary-motion timeline events. */
+export function activateMotion(
+  client: MqttClient,
+  mqttDevice: MQTTDevice,
+  changedAttr: string,
+): void {
   const wasOn = motionOn.get(mqttDevice.id) ?? false;
   console.log(`🚶 ${mqttDevice.name} Motion=ON (${changedAttr})`);
 

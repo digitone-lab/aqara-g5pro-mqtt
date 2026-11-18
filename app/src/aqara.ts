@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { AqaraPullDevicesResponse, AqaraResponse, Device, MQTTDevice } from "./types.js";
 import { isEntitySupported } from "./entities.js";
+import type { MotionHistoryRow } from "./motion-history.js";
 
 let cachedPhoneId: string | undefined;
 
@@ -128,6 +129,29 @@ export async function queryAttrs(attrs: string[], subjectId: string): Promise<Aq
     data: [{ options: attrs, subjectId }],
   });
   return res.data;
+}
+
+/** Aqara Home motion timeline: 3.21.85 verified on E1 and G2H Pro. */
+export async function queryMotionHistory(subjectId: string): Promise<MotionHistoryRow[]> {
+  const endTime = Date.now();
+  const response = await api.post("/app/v1.0/lumi/res/history/log", {
+    subjectId,
+    resourceIds: ["3.21.85"],
+    startTime: endTime - 5 * 60_000,
+    endTime,
+    size: 30,
+    scanId: "",
+  });
+  const data = response.data;
+  if (String(data?.code) !== "0") {
+    throw new Error(`Aqara history query returned code ${data?.code ?? "unknown"}`);
+  }
+  const result = data.result;
+  if (Array.isArray(result)) return result;
+  for (const key of ["data", "list", "items"]) {
+    if (Array.isArray(result?.[key])) return result[key];
+  }
+  return [];
 }
 
 export async function getDevices(): Promise<AqaraPullDevicesResponse> {
