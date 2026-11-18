@@ -6,6 +6,7 @@ import {
   getCameras,
   login,
   queryAttrs,
+  queryMotionHistory,
   writeAttr,
 } from "./aqara.js";
 import { AqaraCameraBridge, getLocalIpv4 } from "./bridge.js";
@@ -28,7 +29,8 @@ import {
 } from "./discovery.js";
 import { ENTITIES, isEntitySupported } from "./entities.js";
 import { FrameHTTPServer } from "./http-server.js";
-import { EVENT_ATTRS, MOTION_EVENT_ATTRS, processEventAttrs, publishMotionDiscovery } from "./motion.js";
+import { EVENT_ATTRS, activateMotion, processEventAttrs, publishMotionDiscovery } from "./motion.js";
+import { MotionHistoryTracker, MOTION_HISTORY_RESOURCE } from "./motion-history.js";
 import { createMQTTClient } from "./mqtt.js";
 import {
   findFreePortRange,
@@ -817,12 +819,6 @@ async function publishRTSPState(subjectId: string, cameraInfo: (typeof cameraDat
 
 // === POLLING ===
 const pollingCameras = new Set<string>();
-// Probe ordinary-motion attributes separately, without changing the
-// known-working AI event query. Limit extra Aqara API calls to 1 per 2 seconds.
-const motionProbeLastPoll = new Map<string, number>();
-const motionProbeValues = new Map<string, string>();
-const motionProbeReported = new Set<string>();
-const MOTION_PROBE_INTERVAL_MS = 2000;
 function poll(): void {
   for (const cameraInfo of cameraData) {
     const attrs = ENTITIES.filter((entity) =>
@@ -839,39 +835,8 @@ function poll(): void {
         const res = await queryAttrs(attrs, did);
         for (const r of res.result || []) await publishAttr(r.attr, r.value, cameraInfo);
         const events = await queryAttrs(EVENT_ATTRS, did);
-        const eventRows = events.code === 0 ? [...(events.result || [])] : [];
-        const now = Date.now();
-        if (now - (motionProbeLastPoll.get(did) || 0) >= MOTION_PROBE_INTERVAL_MS) {
-          motionProbeLastPoll.set(did, now);
-          try {
-            const probe = await queryAttrs(MOTION_EVENT_ATTRS, did);
-            if (probe.code === 0) {
-              const rows = (probe.result || []).filter((row) =>
-                MOTION_EVENT_ATTRS.includes(row.attr),
-              );
-              const fingerprint = JSON.stringify(
-                rows.map((row) => [row.attr, row.timeStamp, row.value]),
-              );
-              if (!motionProbeReported.has(did) || motionProbeValues.get(did) !== fingerprint) {
-                motionProbeReported.add(did);
-                motionProbeValues.set(did, fingerprint);
-                console.info(
-                  `[MotionProbe:${cameraInfo.device.deviceName}] returned attributes: ${rows.map((row) => row.attr).join(", ") || "none (candidates unverified)"}`,
-                );
-              }
-              eventRows.push(...rows);
-            } else if (!motionProbeReported.has(did)) {
-              motionProbeReported.add(did);
-              console.info(
-                `[MotionProbe:${cameraInfo.device.deviceName}] cloud rejected candidate motion attributes (code=${probe.code})`,
-              );
-            }
-          } catch {
-            // Some camera firmware/API versions do not expose ordinary motion.
-          }
-        }
-        if (events.code === 0 || eventRows.length > 0)
-          processEventAttrs(client, cameraInfo.mqttDevice, eventRows);
+        if (events.code === 0)
+          processEventAttrs(client, cameraInfo.mqttDevice, events.result || []);
         await publishRTSPState(did, cameraInfo);
       } catch (error) {
         console.warn(
@@ -879,6 +844,42 @@ function poll(): void {
         );
       } finally {
         pollingCameras.delete(did);
+      }
+    })();
+  }
+}
+
+// History motion is polled independently so API delays cannot block video or normal controls.
+const motionHistoryTracker = new MotionHistoryTracker();
+const historyPolling = new Set<string>();
+const lastHistoryWarning = new Map<string, number>();
+function pollMotionHistory(): void {
+  for (const cameraInfo of cameraData) {
+    const did = cameraInfo.device.did;
+    if (historyPolling.has(did)) continue;
+    historyPolling.add(did);
+    void (async () => {
+      try {
+        const rows = await queryMotionHistory(did);
+        const status = motionHistoryTracker.consume(cameraInfo.mqttDevice.id, rows);
+        if (status === "baseline") {
+          console.info(`[MotionHistory:${cameraInfo.device.deviceName}] baseline ready`);
+        } else if (status === "motion") {
+          activateMotion(client, cameraInfo.mqttDevice, MOTION_HISTORY_RESOURCE);
+        }
+        if (lastHistoryWarning.delete(did)) {
+          console.info(`[MotionHistory:${cameraInfo.device.deviceName}] query recovered`);
+        }
+      } catch (error) {
+        const now = Date.now();
+        if (now - (lastHistoryWarning.get(did) ?? 0) >= 60_000) {
+          lastHistoryWarning.set(did, now);
+          console.warn(
+            `[MotionHistory:${cameraInfo.device.deviceName}] query failed: ${error instanceof Error ? error.message : "unknown error"}`,
+          );
+        }
+      } finally {
+        historyPolling.delete(did);
       }
     })();
   }
@@ -1075,3 +1076,5 @@ const hausInventoryTimer = setInterval(() => {
 hausInventoryTimer.unref();
 setInterval(poll, interval);
 poll();
+setInterval(pollMotionHistory, 3000);
+pollMotionHistory();

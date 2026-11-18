@@ -1,28 +1,28 @@
-# Experimental camera motion-event bridge
+# Aqara E1 and G2H Pro native motion events
 
-This fork fixes the per-camera Home Assistant MQTT motion discovery IDs and
-probes candidate Aqara ordinary-motion attributes for both the E1 and G2H Pro.
+The ordinary motion event source is verified on both cameras: Aqara resource
+`3.21.85` returned by `/app/v1.0/lumi/res/history/log`.
 
-**Important:** The ordinary-motion attribute names are unverified. This build
-does not guarantee the cameras will send those events. Native human-detection
-events, RTSP streams and existing camera controls remain unchanged.
+This fork polls that event history every 3 seconds, independently of the
+existing video/attribute polling. A separate cursor per camera prevents repeated
+events; the initial history query establishes a baseline without replaying
+older detections. Events older than 90 seconds are ignored. Successful new
+motion resets the existing 30-second motion-clear timer.
 
-## Test procedure
+No Pi-side video inference or camera stream configuration changes are needed.
 
-1. In Aqara Home, enable Motion Detection on both cameras.
-2. Stop the upstream add-on before starting this fork (same stream ports).
-3. In the fork's add-on options, ensure MQTT is enabled. If Haus is
-   suppressing native MQTT, set `disable_mqtt_with_haus: false` while testing.
-4. Inspect logs for `[MotionProbe:Bedroom Camera]` and
-   `[MotionProbe:Living Room Camera]`. If they show "none" or a rejected
-   candidate query, the ordinary-motion API is not yet identified.
-5. Walk in front of each camera and watch the MQTT motion binary sensors.
-   On first startup, allow one baseline poll before the first event.
-6. Do not use motion sensors for lighting automations until each camera has
-   actually produced an ON transition.
+## Home Assistant upgrade
 
-## Rollback
+Build and publish the new aarch64 image on GitHub Actions first.
+Update the experimental add-on to v1.6.41, retaining options and P2P state.
+Stop the original add-on before starting the experimental one because they
+share streaming ports. Do not use both simultaneously.
 
-Stop and uninstall this experimental add-on, then restart the upstream
-add-on. Do not run both concurrently. Keep a backup of your original options;
-new installations do not inherit the old add-on's options.
+## Verify
+
+Observe `[MotionHistory:Bedroom Camera] baseline ready` and
+`[MotionHistory:Living Room Camera] baseline ready` after start.
+Walk in each room. The respective `Motion=ON (3.21.85)` log should appear
+and the motion sensor should clear approximately 30 seconds after the last event.
+Aqara's history API is cloud-backed: detection latency is governed by
+the camera's upload and the cloud query time as well as the 3s poll interval.
