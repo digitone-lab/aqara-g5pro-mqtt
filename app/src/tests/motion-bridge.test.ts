@@ -26,7 +26,7 @@ test("motion discovery has a distinct unique ID for each camera", () => {
   assert.deepEqual(ids, ["bedroom_motion", "living_room_motion"]);
 });
 
-test("an ordinary-motion event activates the sensor and clears after its reset delay", (t) => {
+test("a native human event activates the sensor and clears after its reset delay", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const { client, published } = fakeClient();
   const camera: MQTTDevice = {
@@ -34,7 +34,7 @@ test("an ordinary-motion event activates the sensor and clears after its reset d
     model: "G2H Pro", manufacturer: "Aqara",
   };
   const sample = (timeStamp: number) => [
-    { attr: "detect_motion_event", timeStamp, value: "1" },
+    { attr: "detect_human_event", timeStamp, value: "1" },
   ];
   processEventAttrs(client, camera, sample(100));
   assert.equal(published.at(-1)?.payload, "OFF");
