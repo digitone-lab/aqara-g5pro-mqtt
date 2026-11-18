@@ -1,4 +1,4 @@
 # https://developers.home-assistant.io/docs/add-ons/repository#repository-configuration
-name: Aqara G5 Pro MQTT Add-on
-url: 'https://github.com/resonaura/aqara-g5pro-mqtt'
-maintainer: resonaura
+name: Aqara Motion Bridge (Experimental)
+url: 'https://github.com/digitone-lab/aqara-g5pro-mqtt'
+maintainer: digitone-lab

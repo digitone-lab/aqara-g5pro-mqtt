@@ -28,7 +28,7 @@ import {
 } from "./discovery.js";
 import { ENTITIES, isEntitySupported } from "./entities.js";
 import { FrameHTTPServer } from "./http-server.js";
-import { EVENT_ATTRS, processEventAttrs, publishMotionDiscovery } from "./motion.js";
+import { EVENT_ATTRS, MOTION_EVENT_ATTRS, processEventAttrs, publishMotionDiscovery } from "./motion.js";
 import { createMQTTClient } from "./mqtt.js";
 import {
   findFreePortRange,
@@ -817,6 +817,12 @@ async function publishRTSPState(subjectId: string, cameraInfo: (typeof cameraDat
 
 // === POLLING ===
 const pollingCameras = new Set<string>();
+// Probe ordinary-motion attributes separately, without changing the
+// known-working AI event query. Limit extra Aqara API calls to 1 per 2 seconds.
+const motionProbeLastPoll = new Map<string, number>();
+const motionProbeValues = new Map<string, string>();
+const motionProbeReported = new Set<string>();
+const MOTION_PROBE_INTERVAL_MS = 2000;
 function poll(): void {
   for (const cameraInfo of cameraData) {
     const attrs = ENTITIES.filter((entity) =>
@@ -833,8 +839,39 @@ function poll(): void {
         const res = await queryAttrs(attrs, did);
         for (const r of res.result || []) await publishAttr(r.attr, r.value, cameraInfo);
         const events = await queryAttrs(EVENT_ATTRS, did);
-        if (events.code === 0)
-          processEventAttrs(client, cameraInfo.mqttDevice, events.result || []);
+        const eventRows = events.code === 0 ? [...(events.result || [])] : [];
+        const now = Date.now();
+        if (now - (motionProbeLastPoll.get(did) || 0) >= MOTION_PROBE_INTERVAL_MS) {
+          motionProbeLastPoll.set(did, now);
+          try {
+            const probe = await queryAttrs(MOTION_EVENT_ATTRS, did);
+            if (probe.code === 0) {
+              const rows = (probe.result || []).filter((row) =>
+                MOTION_EVENT_ATTRS.includes(row.attr),
+              );
+              const fingerprint = JSON.stringify(
+                rows.map((row) => [row.attr, row.timeStamp, row.value]),
+              );
+              if (!motionProbeReported.has(did) || motionProbeValues.get(did) !== fingerprint) {
+                motionProbeReported.add(did);
+                motionProbeValues.set(did, fingerprint);
+                console.info(
+                  `[MotionProbe:${cameraInfo.device.deviceName}] returned attributes: ${rows.map((row) => row.attr).join(", ") || "none (candidates unverified)"}`,
+                );
+              }
+              eventRows.push(...rows);
+            } else if (!motionProbeReported.has(did)) {
+              motionProbeReported.add(did);
+              console.info(
+                `[MotionProbe:${cameraInfo.device.deviceName}] cloud rejected candidate motion attributes (code=${probe.code})`,
+              );
+            }
+          } catch {
+            // Some camera firmware/API versions do not expose ordinary motion.
+          }
+        }
+        if (events.code === 0 || eventRows.length > 0)
+          processEventAttrs(client, cameraInfo.mqttDevice, eventRows);
         await publishRTSPState(did, cameraInfo);
       } catch (error) {
         console.warn(

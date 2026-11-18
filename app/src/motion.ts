@@ -1,7 +1,20 @@
-import { MqttClient } from "mqtt";
-import { MQTTDevice } from "./types.js";
+import type { MqttClient } from "mqtt";
+import type { MQTTDevice } from "./types.js";
 
-// Event detection attributes: a change in timeStamp of any of these indicates motion
+// Ordinary-motion names are experimental Aqara cloud-query candidates.
+// Their availability varies by camera/firmware and is verified from live results.
+export const MOTION_EVENT_ATTRS = [
+  "motion_detect_event",
+  "detect_motion_event",
+  "motion_event",
+  "motion_detection_event",
+  "detect_move_event",
+  "move_detect_event",
+  "movement_detect_event",
+  "detect_movement_event",
+];
+
+// AI event names previously supported by the bridge.
 export const EVENT_ATTRS = [
   "detect_human_event",
   "detect_pets_event",
@@ -13,6 +26,8 @@ export const EVENT_ATTRS = [
   "vehicle_detect_event",
   "person_detect_event",
 ];
+
+const ALL_EVENT_ATTRS = new Set([...EVENT_ATTRS, ...MOTION_EVENT_ATTRS]);
 
 const RESET_SECONDS = Number(process.env.MOTION_RESET ?? 30);
 
@@ -29,7 +44,7 @@ export function publishMotionDiscovery(client: MqttClient, mqttDevice: MQTTDevic
     `${base}/config`,
     JSON.stringify({
       name: "Motion",
-      unique_id: "motion",
+      unique_id: `${mqttDevice.id}_motion`,
       state_topic: `${base}/state`,
       device_class: "motion",
       payload_on: "ON",
@@ -54,7 +69,7 @@ export function processEventAttrs(
   let changedAttr = "";
 
   for (const row of rows) {
-    if (!EVENT_ATTRS.includes(row.attr)) continue;
+    if (!ALL_EVENT_ATTRS.has(row.attr)) continue;
     const key = `${mqttDevice.id}:${row.attr}`;
     const ts = Number(row.timeStamp ?? 0);
     const value = String(row.value);
