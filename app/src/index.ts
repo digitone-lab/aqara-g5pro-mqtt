@@ -874,9 +874,8 @@ function pollMotionHistory(): void {
         const now = Date.now();
         if (now - (lastHistoryWarning.get(did) ?? 0) >= 60_000) {
           lastHistoryWarning.set(did, now);
-          console.warn(
-            `[MotionHistory:${cameraInfo.device.deviceName}] query failed: ${error instanceof Error ? error.message : "unknown error"}`,
-          );
+          const errorMessage = error instanceof Error ? error.message : "unknown error";
+          console.warn(`[MotionHistory:${cameraInfo.device.deviceName}] query failed: ${errorMessage}`);
         }
       } finally {
         historyPolling.delete(did);

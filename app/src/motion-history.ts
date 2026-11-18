@@ -16,7 +16,11 @@ export interface MotionHistoryRow {
 export class MotionHistoryTracker {
   private readonly latestByCamera = new Map<string, number>();
 
-  consume(cameraId: string, rows: MotionHistoryRow[], now = Date.now()): "baseline" | "motion" | "none" {
+  consume(
+    cameraId: string,
+    rows: MotionHistoryRow[],
+    now = Date.now(),
+  ): "baseline" | "motion" | "none" {
     let latest = 0;
     for (const row of rows) {
       if (String(row.resourceId ?? row.attr) !== MOTION_HISTORY_RESOURCE) continue;

@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { AqaraPullDevicesResponse, AqaraResponse, Device, MQTTDevice } from "./types.js";
 import { isEntitySupported } from "./entities.js";
+import type { MotionHistoryRow } from "./motion-history.js";
 
 let cachedPhoneId: string | undefined;
 
@@ -131,7 +132,7 @@ export async function queryAttrs(attrs: string[], subjectId: string): Promise<Aq
 }
 
 /** Aqara Home motion timeline: 3.21.85 verified on E1 and G2H Pro. */
-export async function queryMotionHistory(subjectId: string): Promise<import("./motion-history.js").MotionHistoryRow[]> {
+export async function queryMotionHistory(subjectId: string): Promise<MotionHistoryRow[]> {
   const endTime = Date.now();
   const response = await api.post("/app/v1.0/lumi/res/history/log", {
     subjectId,
