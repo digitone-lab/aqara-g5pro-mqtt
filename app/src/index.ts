@@ -887,7 +887,7 @@ function poll(): void {
         ).map((entity) => entity.attr)
           .concat(cameraInfo.hasSpotlight ? ["white_light_enable", "white_light_level"] : []);
         const res = await queryAttrs(attrs, did);
-        if (res.code !== 0) throw new Error(`attribute query returned code ${res.code}`);
+        if (String(res.code) !== "0") throw new Error(`attribute query returned code ${res.code}`);
         for (const r of res.result || []) await publishAttr(r.attr, r.value, cameraInfo);
         await publishRTSPState(did, cameraInfo);
         successful = true;
@@ -912,7 +912,7 @@ function pollMotionEvents(): void {
       let successful = false;
       try {
         const events = await queryAttrs(EVENT_ATTRS, cameraInfo.device.did);
-        if (events.code !== 0) throw new Error(`event query returned code ${events.code}`);
+        if (String(events.code) !== "0") throw new Error(`event query returned code ${events.code}`);
         processEventAttrs(client, cameraInfo.mqttDevice, events.result || []);
         successful = true;
       } catch (error) {
