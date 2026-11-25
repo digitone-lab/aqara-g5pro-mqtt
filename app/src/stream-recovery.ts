@@ -81,17 +81,17 @@ export class StreamRecovery {
       ) {
         if (this.attempt >= (this.options.maxAttempts ?? Infinity)) {
           this.options.onExhausted?.(this.attempt);
-          return;
+        } else {
+          // Always retain a retry within the bounded retry budget.
+          const delay = dispatched
+            ? (this.options.videoTimeoutMs ?? 35_000)
+            : (this.options.baseMs ?? 15_000);
+          this.timer = setTimeout(
+            () => this.request("Still waiting for live video"),
+            Math.max(delay, this.nextAttempt - Date.now()),
+          );
+          this.timer.unref();
         }
-        // Always retain a retry within the bounded retry budget.
-        const delay = dispatched
-          ? (this.options.videoTimeoutMs ?? 35_000)
-          : (this.options.baseMs ?? 15_000);
-        this.timer = setTimeout(
-          () => this.request("Still waiting for live video"),
-          Math.max(delay, this.nextAttempt - Date.now()),
-        );
-        this.timer.unref();
       }
     }
   }
