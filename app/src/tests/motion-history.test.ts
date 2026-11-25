@@ -29,10 +29,7 @@ test("both camera cursors are independent, including empty initial history", () 
 test("stale, unrelated, and non-motion values are ignored", () => {
   const tracker = new MotionHistoryTracker();
   tracker.consume("bedroom", [], base);
-  assert.equal(
-    tracker.consume("bedroom", [event(base + 1000, "14.70.85")], base + 2000),
-    "none",
-  );
+  assert.equal(tracker.consume("bedroom", [event(base + 1000, "14.70.85")], base + 2000), "none");
   assert.equal(
     tracker.consume("bedroom", [event(base + 1000, "3.21.85", "0")], base + 2000),
     "none",

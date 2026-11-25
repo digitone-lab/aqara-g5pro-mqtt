@@ -17,6 +17,12 @@ export const EVENT_ATTRS = [
 const ALL_EVENT_ATTRS = new Set(EVENT_ATTRS);
 
 const RESET_SECONDS = Number(process.env.MOTION_RESET ?? 30);
+const cameraHoldSeconds = new Map<string, number>();
+
+/** Per-camera motion reset duration; configured once during discovery. */
+export function setMotionHoldSeconds(cameraId: string, holdSeconds: number): void {
+  cameraHoldSeconds.set(cameraId, Math.max(5, Math.min(600, Math.round(holdSeconds))));
+}
 
 type CameraKey = string;
 // Last seen timeStamp/value per attribute
@@ -104,12 +110,15 @@ export function activateMotion(
   if (old) clearTimeout(old);
   offTimers.set(
     mqttDevice.id,
-    setTimeout(() => {
-      motionOn.set(mqttDevice.id, false);
-      client.publish(`homeassistant/binary_sensor/${mqttDevice.id}/motion/state`, "OFF", {
-        retain: true,
-      });
-      console.log(`🌙 ${mqttDevice.name} Motion=OFF`);
-    }, RESET_SECONDS * 1000),
+    setTimeout(
+      () => {
+        motionOn.set(mqttDevice.id, false);
+        client.publish(`homeassistant/binary_sensor/${mqttDevice.id}/motion/state`, "OFF", {
+          retain: true,
+        });
+        console.log(`🌙 ${mqttDevice.name} Motion=OFF`);
+      },
+      (cameraHoldSeconds.get(mqttDevice.id) ?? RESET_SECONDS) * 1000,
+    ),
   );
 }
