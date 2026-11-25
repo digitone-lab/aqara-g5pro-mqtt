@@ -114,3 +114,28 @@ test("disabled streams do not enter a retry loop", async () => {
     recovery.stop();
   }
 });
+
+test("protection mode caps consecutive recovery attempts until stream is toggled", async () => {
+  let calls = 0;
+  let exhausted = 0;
+  const recovery = new StreamRecovery({
+    isEnabled: async () => true,
+    recover: async () => { calls++; },
+    maxAttempts: 2,
+    onExhausted: (count) => { exhausted = count; },
+    baseMs: 5,
+    maxMs: 5,
+    videoTimeoutMs: 5,
+    random: () => 1,
+  });
+  try {
+    recovery.request("initial");
+    await until(() => exhausted === 2);
+    recovery.request("repeated watchdog");
+    await delay(75);
+    assert.equal(calls, 2);
+    assert.equal(exhausted, 2);
+  } finally {
+    recovery.stop();
+  }
+});
