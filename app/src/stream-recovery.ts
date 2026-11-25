@@ -3,6 +3,8 @@ export interface StreamRecoveryOptions {
   isEnabled: () => Promise<boolean>;
   recover: (signal: AbortSignal, attempt: number, reason: string) => Promise<void>;
   onError?: (error: unknown, attempt: number) => void;
+  maxAttempts?: number;
+  onExhausted?: (attempt: number) => void;
   baseMs?: number;
   maxMs?: number;
   videoTimeoutMs?: number;
@@ -24,7 +26,7 @@ export class StreamRecovery {
   constructor(private readonly options: StreamRecoveryOptions) {}
 
   public request(reason: string): void {
-    if (this.stopped || this.active) return;
+    if (this.stopped || this.active || this.attempt >= (this.options.maxAttempts ?? Infinity)) return;
     clearTimeout(this.stableTimer);
     this.stableTimer = undefined;
     clearTimeout(this.timer);
@@ -37,7 +39,7 @@ export class StreamRecovery {
 
   private async run(reason: string): Promise<void> {
     this.timer = undefined;
-    if (this.stopped || this.active) return;
+    if (this.stopped || this.active || this.attempt >= (this.options.maxAttempts ?? Infinity)) return;
     const generation = this.generation;
     const controller = new AbortController();
     this.active = controller;
@@ -75,7 +77,11 @@ export class StreamRecovery {
         !this.stopped &&
         healthyRevision === this.healthyRevision
       ) {
-        // Always retain a retry, including a watchdog request inside the cooldown.
+        if (this.attempt >= (this.options.maxAttempts ?? Infinity)) {
+          this.options.onExhausted?.(this.attempt);
+          return;
+        }
+        // Always retain a retry within the bounded retry budget.
         const delay = dispatched
           ? (this.options.videoTimeoutMs ?? 35_000)
           : (this.options.baseMs ?? 15_000);
