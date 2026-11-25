@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PollGate, isG2HPro, parseCameraProfiles, p2pQualityChannel, resolveCameraPolicy } from "../camera-policy.js";
+import {
+  PollGate,
+  isG2HPro,
+  parseCameraProfiles,
+  p2pQualityChannel,
+  resolveCameraPolicy,
+} from "../camera-policy.js";
 
 const bedroom = {
   did: "lumi1.54ef44447f42",
@@ -25,17 +31,19 @@ test("G2H Pro is protected by default and no video or polling is allowed", () =>
 });
 
 test("G2H Pro can opt in to motion-only without enabling P2P", () => {
-  const profiles = parseCameraProfiles(JSON.stringify({
-    "Bedroom Camera": {
-      enabled: true,
-      p2pAllowed: false,
-      attributeSeconds: 90,
-      historySeconds: 20,
-      motionHoldSeconds: 45,
-      motionMode: "history",
-      streamQuality: "low",
-    },
-  }));
+  const profiles = parseCameraProfiles(
+    JSON.stringify({
+      "Bedroom Camera": {
+        enabled: true,
+        p2pAllowed: false,
+        attributeSeconds: 90,
+        historySeconds: 20,
+        motionHoldSeconds: 45,
+        motionMode: "history",
+        streamQuality: "low",
+      },
+    }),
+  );
   const p = resolveCameraPolicy(bedroom, profiles, {});
   assert.equal(p.enabled, true);
   assert.equal(p.p2pAllowed, false);
@@ -46,11 +54,13 @@ test("G2H Pro can opt in to motion-only without enabling P2P", () => {
 });
 
 test("profiles select exact DID before name and remain independent", () => {
-  const p = parseCameraProfiles(JSON.stringify({
-    "*": { eventSeconds: 12 },
-    "Living Room Camera": { motionMode: "events", streamQuality: "medium" },
-    "lumi1.other": { eventSeconds: 5 },
-  }));
+  const p = parseCameraProfiles(
+    JSON.stringify({
+      "*": { eventSeconds: 12 },
+      "Living Room Camera": { motionMode: "events", streamQuality: "medium" },
+      "lumi1.other": { eventSeconds: 5 },
+    }),
+  );
   const l = resolveCameraPolicy(living, p, {});
   assert.equal(l.eventSeconds, 5);
   assert.equal(l.motionMode, "events");

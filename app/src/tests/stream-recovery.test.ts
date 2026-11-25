@@ -120,9 +120,13 @@ test("protection mode caps consecutive recovery attempts until stream is toggled
   let exhausted = 0;
   const recovery = new StreamRecovery({
     isEnabled: async () => true,
-    recover: async () => { calls++; },
+    recover: async () => {
+      calls++;
+    },
     maxAttempts: 2,
-    onExhausted: (count) => { exhausted = count; },
+    onExhausted: (count) => {
+      exhausted = count;
+    },
     baseMs: 5,
     maxMs: 5,
     videoTimeoutMs: 5,

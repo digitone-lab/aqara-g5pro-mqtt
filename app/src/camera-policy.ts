@@ -71,8 +71,10 @@ export function resolveCameraPolicy(
     historySeconds: protection ? Math.max(15, historySeconds) : historySeconds,
     motionMode: protection ? "history" : "both",
     motionHoldSeconds: holdSeconds,
-    streamQuality: defaultQuality === "high" || defaultQuality === "medium" ||
-      defaultQuality === "low" ? defaultQuality : "auto",
+    streamQuality:
+      defaultQuality === "high" || defaultQuality === "medium" || defaultQuality === "low"
+        ? defaultQuality
+        : "auto",
     maxReconnectAttempts: protection ? 3 : 5,
   };
   const candidates = [
@@ -91,7 +93,10 @@ export function resolveCameraPolicy(
     policy.historySeconds = seconds(profile.historySeconds, policy.historySeconds, 5);
     policy.motionHoldSeconds = seconds(profile.motionHoldSeconds, policy.motionHoldSeconds, 5, 600);
     policy.maxReconnectAttempts = seconds(
-      profile.maxReconnectAttempts, policy.maxReconnectAttempts, 1, 10,
+      profile.maxReconnectAttempts,
+      policy.maxReconnectAttempts,
+      1,
+      10,
     );
     if (["off", "events", "history", "both"].includes(String(profile.motionMode))) {
       policy.motionMode = profile.motionMode as MotionMode;
@@ -116,7 +121,10 @@ export class PollGate {
   private nextAt = 0;
   private inFlight = false;
   private errors = 0;
-  constructor(private readonly intervalMs: number, private readonly maxBackoffMs = 600_000) {}
+  constructor(
+    private readonly intervalMs: number,
+    private readonly maxBackoffMs = 600_000,
+  ) {}
 
   begin(now = Date.now()): boolean {
     if (this.inFlight || now < this.nextAt) return false;

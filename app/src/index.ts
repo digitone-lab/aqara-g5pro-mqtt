@@ -14,7 +14,13 @@ import { resolveCameraIp } from "./camera-ip.js";
 import "./config.js";
 import { promises as fs } from "node:fs";
 import { getCameraStreamQualities, pickMaxStreamQuality } from "./aqara.js";
-import { parseCameraProfiles, resolveCameraPolicy, p2pQualityChannel, PollGate, type CameraPolicy } from "./camera-policy.js";
+import {
+  parseCameraProfiles,
+  resolveCameraPolicy,
+  p2pQualityChannel,
+  PollGate,
+  type CameraPolicy,
+} from "./camera-policy.js";
 import {
   publishCameraDiscovery,
   publishDiscovery,
@@ -30,7 +36,13 @@ import {
 } from "./discovery.js";
 import { ENTITIES, isEntitySupported } from "./entities.js";
 import { FrameHTTPServer } from "./http-server.js";
-import { EVENT_ATTRS, activateMotion, processEventAttrs, publishMotionDiscovery, setMotionHoldSeconds } from "./motion.js";
+import {
+  EVENT_ATTRS,
+  activateMotion,
+  processEventAttrs,
+  publishMotionDiscovery,
+  setMotionHoldSeconds,
+} from "./motion.js";
 import { MotionHistoryTracker, MOTION_HISTORY_RESOURCE } from "./motion-history.js";
 import { createMQTTClient } from "./mqtt.js";
 import {
@@ -274,16 +286,24 @@ function restartCameraStream(cameraInfo: (typeof cameraData)[number], reason: st
   if (!recovery) {
     recovery = new StreamRecovery({
       isEnabled: async () =>
-        cameraInfo.policy.enabled && cameraInfo.policy.p2pAllowed &&
+        cameraInfo.policy.enabled &&
+        cameraInfo.policy.p2pAllowed &&
         (await loadP2PState())[did] !== false,
       baseMs: 60_000,
       maxMs: 300_000,
       maxAttempts: cameraInfo.policy.maxReconnectAttempts,
       onExhausted: (attempts) => {
-        console.error(`[Recovery:${cameraInfo.device.deviceName}] Paused after ${attempts} attempts; toggle P2P OFF/ON to retry`);
-        diagnostics.record("camera.recovery_exhausted", {
-          camera: cameraDiagnosticId(did), attempts,
-        }, "error");
+        console.error(
+          `[Recovery:${cameraInfo.device.deviceName}] Paused after ${attempts} attempts; toggle P2P OFF/ON to retry`,
+        );
+        diagnostics.record(
+          "camera.recovery_exhausted",
+          {
+            camera: cameraDiagnosticId(did),
+            attempts,
+          },
+          "error",
+        );
       },
       recover: async (signal, attempt, message) => {
         diagnostics.record(
@@ -378,7 +398,10 @@ async function ensureCameraBridge(
       udpAudioPort: audioRtpPort,
       model: cameraInfo.device.model,
       videoCodec: cameraInfo.videoCodec,
-      p2pQualityChannel: p2pQualityChannel(cameraInfo.policy.streamQuality, cameraInfo.device.model),
+      p2pQualityChannel: p2pQualityChannel(
+        cameraInfo.policy.streamQuality,
+        cameraInfo.device.model,
+      ),
       videoKey: process.env.VIDEO_KEY,
       deviceName: cameraInfo.device.deviceName,
     });
@@ -558,7 +581,6 @@ rtmpServer.on("unpublish", ({ name }: { name: string }) => {
   cam.bridge.stopTalkback();
 });
 
-
 // === DISCOVERY ===
 async function publishCameraDefinitions() {
   console.log("[Discovery] Refreshing camera definitions...");
@@ -589,7 +611,9 @@ async function publishCameraDefinitions() {
       publishSDCardDiscovery(client, mqttDevice);
       publishMotionDiscovery(client, mqttDevice);
       if (!cameraData[idx].policy.enabled || cameraData[idx].policy.motionMode === "off") {
-        client.publish(`homeassistant/binary_sensor/${mqttDevice.id}/motion/state`, "OFF", { retain: true });
+        client.publish(`homeassistant/binary_sensor/${mqttDevice.id}/motion/state`, "OFF", {
+          retain: true,
+        });
       }
       publishRTSPDiscovery(client, mqttDevice);
       publishP2PStreamSwitchDiscovery(client, mqttDevice);
@@ -605,7 +629,9 @@ async function publishCameraDefinitions() {
       client.publish(`homeassistant/switch/${mqttDevice.id}/talkback/config`, "", { retain: true });
 
       // Initial state from persisted disk state or active bridge
-      const isP2pOn = cameraData[idx].policy.enabled && cameraData[idx].policy.p2pAllowed &&
+      const isP2pOn =
+        cameraData[idx].policy.enabled &&
+        cameraData[idx].policy.p2pAllowed &&
         (savedP2pState[device.did] || !!cameraData[idx].bridge);
       client.publish(
         `homeassistant/switch/${mqttDevice.id}/p2p_stream/state`,
@@ -630,25 +656,28 @@ async function publishCameraDefinitions() {
 
       // Do not request camera stream metadata for an excluded camera.
       if (!cameraData[idx].policy.enabled) {
-        client.publish(`homeassistant/sensor/${mqttDevice.id}/native_rtsp_stream/state`, "null", { retain: true });
-      } else try {
-        const qualities = await getCameraStreamQualities(device.did);
-        const best = pickMaxStreamQuality(qualities);
-        const nativeRtspUrl = best
-          ? `rtsp://${device.ip || getLocalIpv4()}:554/live/ch${best.channel}`
-          : "null";
-        client.publish(
-          `homeassistant/sensor/${mqttDevice.id}/native_rtsp_stream/state`,
-          nativeRtspUrl,
-          {
-            retain: true,
-          },
-        );
-      } catch {
         client.publish(`homeassistant/sensor/${mqttDevice.id}/native_rtsp_stream/state`, "null", {
           retain: true,
         });
-      }
+      } else
+        try {
+          const qualities = await getCameraStreamQualities(device.did);
+          const best = pickMaxStreamQuality(qualities);
+          const nativeRtspUrl = best
+            ? `rtsp://${device.ip || getLocalIpv4()}:554/live/ch${best.channel}`
+            : "null";
+          client.publish(
+            `homeassistant/sensor/${mqttDevice.id}/native_rtsp_stream/state`,
+            nativeRtspUrl,
+            {
+              retain: true,
+            },
+          );
+        } catch {
+          client.publish(`homeassistant/sensor/${mqttDevice.id}/native_rtsp_stream/state`, "null", {
+            retain: true,
+          });
+        }
 
       publishCameraDiscovery(client, mqttDevice, p2pRtspUrl);
     }),
@@ -758,7 +787,9 @@ async function executeCameraCommand(topic: string, msg: Buffer) {
     const talkbackRtmpTopic = `homeassistant/sensor/${deviceId}/talkback_rtmp/state`;
     if (value === "ON") {
       if (!cameraInfo.policy.enabled || !cameraInfo.policy.p2pAllowed) {
-        console.warn(`[P2P Stream] Blocked by policy for ${cameraInfo.device.deviceName}; enable p2pAllowed explicitly`);
+        console.warn(
+          `[P2P Stream] Blocked by policy for ${cameraInfo.device.deviceName}; enable p2pAllowed explicitly`,
+        );
         client.publish(p2pSwitchTopic, "OFF", { retain: true });
         return;
       }
@@ -800,7 +831,9 @@ async function executeCameraCommand(topic: string, msg: Buffer) {
   }
 
   if (!cameraInfo.policy.enabled) {
-    console.warn(`[CameraPolicy] Ignoring command for disabled camera ${cameraInfo.device.deviceName}`);
+    console.warn(
+      `[CameraPolicy] Ignoring command for disabled camera ${cameraInfo.device.deviceName}`,
+    );
     return;
   }
 
@@ -884,7 +917,8 @@ function poll(): void {
       try {
         const attrs = ENTITIES.filter((entity) =>
           isEntitySupported(cameraInfo.device.model, entity.attr),
-        ).map((entity) => entity.attr)
+        )
+          .map((entity) => entity.attr)
           .concat(cameraInfo.hasSpotlight ? ["white_light_enable", "white_light_level"] : []);
         const res = await queryAttrs(attrs, did);
         if (String(res.code) !== "0") throw new Error(`attribute query returned code ${res.code}`);
@@ -904,19 +938,22 @@ function poll(): void {
 
 function pollMotionEvents(): void {
   for (const cameraInfo of cameraData) {
-    if (!cameraInfo.policy.enabled ||
-        !["events", "both"].includes(cameraInfo.policy.motionMode)) continue;
+    if (!cameraInfo.policy.enabled || !["events", "both"].includes(cameraInfo.policy.motionMode))
+      continue;
     const gate = eventGates.get(cameraInfo.device.did)!;
     if (!gate.begin()) continue;
     void (async () => {
       let successful = false;
       try {
         const events = await queryAttrs(EVENT_ATTRS, cameraInfo.device.did);
-        if (String(events.code) !== "0") throw new Error(`event query returned code ${events.code}`);
+        if (String(events.code) !== "0")
+          throw new Error(`event query returned code ${events.code}`);
         processEventAttrs(client, cameraInfo.mqttDevice, events.result || []);
         successful = true;
       } catch (error) {
-        console.warn(`[Events:${cameraInfo.device.deviceName}] ${error instanceof Error ? error.message : "Request failed"}`);
+        console.warn(
+          `[Events:${cameraInfo.device.deviceName}] ${error instanceof Error ? error.message : "Request failed"}`,
+        );
       } finally {
         gate.finish(successful);
       }
@@ -928,8 +965,8 @@ const motionHistoryTracker = new MotionHistoryTracker();
 const lastHistoryWarning = new Map<string, number>();
 function pollMotionHistory(): void {
   for (const cameraInfo of cameraData) {
-    if (!cameraInfo.policy.enabled ||
-        !["history", "both"].includes(cameraInfo.policy.motionMode)) continue;
+    if (!cameraInfo.policy.enabled || !["history", "both"].includes(cameraInfo.policy.motionMode))
+      continue;
     const did = cameraInfo.device.did;
     const gate = historyGates.get(did)!;
     if (!gate.begin()) continue;
@@ -952,7 +989,9 @@ function pollMotionHistory(): void {
         if (now - (lastHistoryWarning.get(did) ?? 0) >= 60_000) {
           lastHistoryWarning.set(did, now);
           const errorMessage = error instanceof Error ? error.message : "unknown error";
-          console.warn(`[MotionHistory:${cameraInfo.device.deviceName}] query failed: ${errorMessage}`);
+          console.warn(
+            `[MotionHistory:${cameraInfo.device.deviceName}] query failed: ${errorMessage}`,
+          );
         }
       } finally {
         gate.finish(successful);

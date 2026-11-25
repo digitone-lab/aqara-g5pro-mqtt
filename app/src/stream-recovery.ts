@@ -26,7 +26,8 @@ export class StreamRecovery {
   constructor(private readonly options: StreamRecoveryOptions) {}
 
   public request(reason: string): void {
-    if (this.stopped || this.active || this.attempt >= (this.options.maxAttempts ?? Infinity)) return;
+    if (this.stopped || this.active || this.attempt >= (this.options.maxAttempts ?? Infinity))
+      return;
     clearTimeout(this.stableTimer);
     this.stableTimer = undefined;
     clearTimeout(this.timer);
@@ -39,7 +40,8 @@ export class StreamRecovery {
 
   private async run(reason: string): Promise<void> {
     this.timer = undefined;
-    if (this.stopped || this.active || this.attempt >= (this.options.maxAttempts ?? Infinity)) return;
+    if (this.stopped || this.active || this.attempt >= (this.options.maxAttempts ?? Infinity))
+      return;
     const generation = this.generation;
     const controller = new AbortController();
     this.active = controller;

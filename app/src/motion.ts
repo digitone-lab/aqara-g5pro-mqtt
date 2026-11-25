@@ -110,12 +110,15 @@ export function activateMotion(
   if (old) clearTimeout(old);
   offTimers.set(
     mqttDevice.id,
-    setTimeout(() => {
-      motionOn.set(mqttDevice.id, false);
-      client.publish(`homeassistant/binary_sensor/${mqttDevice.id}/motion/state`, "OFF", {
-        retain: true,
-      });
-      console.log(`🌙 ${mqttDevice.name} Motion=OFF`);
-    }, (cameraHoldSeconds.get(mqttDevice.id) ?? RESET_SECONDS) * 1000),
+    setTimeout(
+      () => {
+        motionOn.set(mqttDevice.id, false);
+        client.publish(`homeassistant/binary_sensor/${mqttDevice.id}/motion/state`, "OFF", {
+          retain: true,
+        });
+        console.log(`🌙 ${mqttDevice.name} Motion=OFF`);
+      },
+      (cameraHoldSeconds.get(mqttDevice.id) ?? RESET_SECONDS) * 1000,
+    ),
   );
 }
