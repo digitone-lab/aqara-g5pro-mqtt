@@ -18,6 +18,83 @@ While initially created for the **Aqara Camera Hub G5 Pro**, the architecture is
 
 ---
 
+## Stability profiles (v1.6.42)
+
+The G2H Pro is **excluded from all periodic polling and P2P video by default** when
+`g2h_pro_protection: true` (the new default). This is a precaution for cameras
+that become unresponsive until power-cycled. It does **not** change camera
+firmware or guarantee that the underlying fault is resolved.
+
+In **Home Assistant → Settings → Apps → Aqara Motion Bridge → Configuration**, adjust:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `poll_interval` | 30 | Attribute refresh interval in seconds (minimum 5) |
+| `motion_event_interval` | 15 | Event-resource polling interval in seconds (minimum 3) |
+| `motion_history_interval` | 15 | Motion timeline polling interval in seconds (minimum 5) |
+| `motion_hold_seconds` | 30 | MQTT motion ON hold time |
+| `stream_quality` | `auto` | P2P channel preset: auto/high/medium/low |
+| `g2h_pro_protection` | `true` | Exclude G2H Pro until explicitly opted in |
+| `camera_profiles` | `{}` | Per-camera overrides as JSON text |
+
+For a **gradual G2H Pro motion-only test**, with P2P video **still prohibited**:
+
+```json
+{
+  "Bedroom Camera": {
+    "enabled": true,
+    "p2pAllowed": false,
+    "attributeSeconds": 90,
+    "eventSeconds": 15,
+    "historySeconds": 20,
+    "motionMode": "history",
+    "motionHoldSeconds": 30,
+    "streamQuality": "low"
+  },
+  "Living Room Camera": {
+    "enabled": true,
+    "p2pAllowed": true,
+    "attributeSeconds": 30,
+    "eventSeconds": 15,
+    "historySeconds": 15,
+    "motionMode": "both",
+    "streamQuality": "medium",
+    "maxReconnectAttempts": 5
+  }
+}
+```
+
+Enter this as **one JSON string** in `camera_profiles` (Home Assistant add-on
+options store a string). Match by camera display name or Aqara DID; the DID
+wins if both profiles are present. `"*"` is supported as a base policy and
+`"model:lumi.camera.acn004"` as a model-wide profile. Name matching is
+case-insensitive. A disabled camera remains discovered in MQTT but motion is
+forced OFF and no new stream is created.
+
+- `motionMode`: `off` / `events` / `history` / `both`. The G2H Pro
+  uses resource `3.21.85` for history; this is a cloud-side API and is not
+  guaranteed to produce identical events on every firmware.
+- `streamQuality` maps camera-specific **P2P channel presets**, not an exact
+  pixel-resolution or bitrate guarantee. G5 Pro channel ordering differs from
+  E1/G2H; forcing unsupported channels can fail on untested firmware.
+- `p2pAllowed: false` rejects new video/talkback sessions even if MQTT
+  retains an old P2P ON command. Enabling P2P requires explicit
+  `"p2pAllowed": true` and switching the camera's P2P switch ON.
+- Cloud queries are serialized per camera and type, and back off exponentially
+  on errors. Video recovery stops after the configured consecutive retry budget;
+  toggle P2P OFF/ON to start another attempt.
+- Configuration changes require **restarting the add-on**. The runtime options
+  do not require re-authentication. Do not test full video and high-frequency
+  polling simultaneously on an unstable G2H Pro.
+
+**Suggested rollout:** Start with G2H Pro excluded; keep other cameras running.
+Then enable G2H Pro only for motion history (15–30 seconds), observe for several
+days, and only then consider P2P video. Check Aqara app and HomeKit camera
+functionality separately to distinguish an actual camera freeze from bridge
+stream errors.
+
+---
+
 ## 📸 Supported Camera Models
 
 | Model | Codename | Video & P2P RTSP | 2-Way Talkback | PTZ Controls | Spotlight | Tested Status |
