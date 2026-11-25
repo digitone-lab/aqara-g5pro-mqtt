@@ -1,7 +1,7 @@
 name: "Aqara Motion Bridge (Experimental)"
 slug: "aqara-g5pro-mqtt"
 description: "MQTT integration for Aqara G5 Pro camera via Home Assistant"
-version: "1.6.41"
+version: "1.6.42"
 changelog: "CHANGELOG.md"
 image: "ghcr.io/digitone-lab/aqara-g5pro-mqtt"
 arch:
@@ -25,7 +25,13 @@ options:
   mqtt_user: ""
   mqtt_pass: ""
   camera_ips: ""
-  poll_interval: 1
+  poll_interval: 30
+  motion_event_interval: 15
+  motion_history_interval: 15
+  motion_hold_seconds: 30
+  stream_quality: "auto"
+  g2h_pro_protection: true
+  camera_profiles: "{}"
   log_level: "info"
 schema:
   disable_mqtt_with_haus: bool?
@@ -37,4 +43,10 @@ schema:
   mqtt_pass: str?
   camera_ips: str?
   poll_interval: int
+  motion_event_interval: int
+  motion_history_interval: int
+  motion_hold_seconds: int
+  stream_quality: list(auto|high|medium|low)
+  g2h_pro_protection: bool
+  camera_profiles: str
   log_level: list(debug|info|warn|error)
