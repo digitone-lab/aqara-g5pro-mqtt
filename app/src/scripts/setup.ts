@@ -63,7 +63,7 @@ async function main() {
     "mqtt-url": { type: "string" },
     "mqtt-user": { type: "string" },
     "mqtt-pass": { type: "string" },
-    "poll-interval": { type: "number", default: 1 },
+    "poll-interval": { type: "number", default: 30 },
     "log-level": { type: "string", default: "info" },
     "camera-ips": { type: "string" },
   }).argv;
