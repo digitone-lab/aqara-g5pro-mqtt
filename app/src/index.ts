@@ -142,9 +142,11 @@ function supportsPtz(model: string): boolean {
 for (let i = 0; i < cameras.length; i++) {
   const camera = cameras[i];
   const mqttDevice = aqaraDeviceToMQTT(camera);
-  const capabilities = await checkDeviceCapabilities(camera.did, camera.model);
-  const saved = await getCameraState(camera.did);
   const policy = resolveCameraPolicy(camera, cameraProfiles);
+  const capabilities = policy.enabled
+    ? await checkDeviceCapabilities(camera.did, camera.model)
+    : { hasSpotlight: false };
+  const saved = await getCameraState(camera.did);
   setMotionHoldSeconds(mqttDevice.id, policy.motionHoldSeconds);
   console.log(`[CameraPolicy:${camera.deviceName}] ${JSON.stringify(policy)}`);
 
@@ -626,8 +628,10 @@ async function publishCameraDefinitions() {
         { retain: true },
       );
 
-      // Query Native camera RTSP URL if available
-      try {
+      // Do not request camera stream metadata for an excluded camera.
+      if (!cameraData[idx].policy.enabled) {
+        client.publish(`homeassistant/sensor/${mqttDevice.id}/native_rtsp_stream/state`, "null", { retain: true });
+      } else try {
         const qualities = await getCameraStreamQualities(device.did);
         const best = pickMaxStreamQuality(qualities);
         const nativeRtspUrl = best
