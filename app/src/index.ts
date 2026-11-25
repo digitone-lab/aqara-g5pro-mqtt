@@ -13,7 +13,8 @@ import { AqaraCameraBridge, getLocalIpv4 } from "./bridge.js";
 import { resolveCameraIp } from "./camera-ip.js";
 import "./config.js";
 import { promises as fs } from "node:fs";
-import { getCameraStreamQualities, pickMaxStreamQuality, jsonQualityChannel } from "./aqara.js";
+import { getCameraStreamQualities, pickMaxStreamQuality } from "./aqara.js";
+import { parseCameraProfiles, resolveCameraPolicy, p2pQualityChannel, PollGate, type CameraPolicy } from "./camera-policy.js";
 import {
   publishCameraDiscovery,
   publishDiscovery,
@@ -29,7 +30,7 @@ import {
 } from "./discovery.js";
 import { ENTITIES, isEntitySupported } from "./entities.js";
 import { FrameHTTPServer } from "./http-server.js";
-import { EVENT_ATTRS, activateMotion, processEventAttrs, publishMotionDiscovery } from "./motion.js";
+import { EVENT_ATTRS, activateMotion, processEventAttrs, publishMotionDiscovery, setMotionHoldSeconds } from "./motion.js";
 import { MotionHistoryTracker, MOTION_HISTORY_RESOURCE } from "./motion-history.js";
 import { createMQTTClient } from "./mqtt.js";
 import {
@@ -116,10 +117,12 @@ const cameraData: Array<{
   mqttDevice: MQTTDevice;
   hasSpotlight: boolean;
   videoCodec: "h264" | "hevc";
+  policy: CameraPolicy;
   bridge?: AqaraCameraBridge;
   snapshotter?: FrameSnapshotter;
 }> = [];
 
+const cameraProfiles = parseCameraProfiles(process.env.CAMERA_PROFILES);
 const rtspBasePort = parseInt(process.env.RTSP_PORT || "8555", 10);
 
 // PTZ-capable Aqara models (pan/tilt cameras: G3, E1, etc.). G5 Pro (agl004) / G2H / G4 are fixed.
@@ -141,12 +144,16 @@ for (let i = 0; i < cameras.length; i++) {
   const mqttDevice = aqaraDeviceToMQTT(camera);
   const capabilities = await checkDeviceCapabilities(camera.did, camera.model);
   const saved = await getCameraState(camera.did);
+  const policy = resolveCameraPolicy(camera, cameraProfiles);
+  setMotionHoldSeconds(mqttDevice.id, policy.motionHoldSeconds);
+  console.log(`[CameraPolicy:${camera.deviceName}] ${JSON.stringify(policy)}`);
 
   cameraData.push({
     device: camera,
     mqttDevice,
     hasSpotlight: capabilities.hasSpotlight,
     videoCodec: saved.video_codec === "hevc" ? "hevc" : "h264",
+    policy,
     bridge: undefined,
   });
   console.log(`📋 ${camera.deviceName}: spotlight=${capabilities.hasSpotlight ? "✅" : "❌"}`);
@@ -259,11 +266,23 @@ function cameraBySlug(name: string) {
 }
 
 function restartCameraStream(cameraInfo: (typeof cameraData)[number], reason: string): void {
+  if (!cameraInfo.policy.enabled || !cameraInfo.policy.p2pAllowed) return;
   const did = cameraInfo.device.did;
   let recovery = recoveries.get(did);
   if (!recovery) {
     recovery = new StreamRecovery({
-      isEnabled: async () => (await loadP2PState())[did] !== false,
+      isEnabled: async () =>
+        cameraInfo.policy.enabled && cameraInfo.policy.p2pAllowed &&
+        (await loadP2PState())[did] !== false,
+      baseMs: 60_000,
+      maxMs: 300_000,
+      maxAttempts: cameraInfo.policy.maxReconnectAttempts,
+      onExhausted: (attempts) => {
+        console.error(`[Recovery:${cameraInfo.device.deviceName}] Paused after ${attempts} attempts; toggle P2P OFF/ON to retry`);
+        diagnostics.record("camera.recovery_exhausted", {
+          camera: cameraDiagnosticId(did), attempts,
+        }, "error");
+      },
       recover: async (signal, attempt, message) => {
         diagnostics.record(
           "camera.recovery",
@@ -319,6 +338,9 @@ async function ensureCameraBridge(
   cameraInfo: (typeof cameraData)[number],
   signal?: AbortSignal,
 ): Promise<AqaraCameraBridge> {
+  if (!cameraInfo.policy.enabled || !cameraInfo.policy.p2pAllowed) {
+    throw new Error(`P2P disabled by camera policy for ${cameraInfo.device.deviceName}`);
+  }
   if (cameraInfo.bridge) return cameraInfo.bridge;
   const existing = bridgeStartPromises.get(cameraInfo.device.did);
   if (existing) return existing;
@@ -354,7 +376,7 @@ async function ensureCameraBridge(
       udpAudioPort: audioRtpPort,
       model: cameraInfo.device.model,
       videoCodec: cameraInfo.videoCodec,
-      p2pQualityChannel: jsonQualityChannel(null, cameraInfo.device.model),
+      p2pQualityChannel: p2pQualityChannel(cameraInfo.policy.streamQuality, cameraInfo.device.model),
       videoKey: process.env.VIDEO_KEY,
       deviceName: cameraInfo.device.deviceName,
     });
@@ -476,7 +498,7 @@ void (async () => {
     `💾 Loaded persistent state for ${Object.keys(initialSavedP2pState).length} camera(s) from SQLite (${getDataDir()})`,
   );
   cameraData.forEach((cam) => {
-    if (initialSavedP2pState[cam.device.did]) {
+    if (cam.policy.enabled && cam.policy.p2pAllowed && initialSavedP2pState[cam.device.did]) {
       console.log(
         `🔄 [P2P Stream] Auto-restoring saved P2P stream (ON) for ${cam.device.deviceName}...`,
       );
@@ -489,6 +511,10 @@ rtmpServer.on("publish", async ({ name }: { name: string }) => {
   const cam = cameraBySlug(name);
   if (!cam) {
     console.warn(`⚠️ [Talkback RTMP] unknown stream "${name}"`);
+    return;
+  }
+  if (!cam.policy.enabled || !cam.policy.p2pAllowed) {
+    console.warn(`[Talkback RTMP] Stream disabled for ${cam.device.deviceName}`);
     return;
   }
   const feed = { ready: false, queue: [] as Buffer[] };
@@ -530,7 +556,6 @@ rtmpServer.on("unpublish", ({ name }: { name: string }) => {
   cam.bridge.stopTalkback();
 });
 
-const interval = Number(process.env.POLL_INTERVAL || 1) * 1000;
 
 // === DISCOVERY ===
 async function publishCameraDefinitions() {
@@ -561,6 +586,9 @@ async function publishCameraDefinitions() {
       }
       publishSDCardDiscovery(client, mqttDevice);
       publishMotionDiscovery(client, mqttDevice);
+      if (!cameraData[idx].policy.enabled || cameraData[idx].policy.motionMode === "off") {
+        client.publish(`homeassistant/binary_sensor/${mqttDevice.id}/motion/state`, "OFF", { retain: true });
+      }
       publishRTSPDiscovery(client, mqttDevice);
       publishP2PStreamSwitchDiscovery(client, mqttDevice);
       publishP2PRTSPDiscovery(client, mqttDevice);
@@ -575,7 +603,8 @@ async function publishCameraDefinitions() {
       client.publish(`homeassistant/switch/${mqttDevice.id}/talkback/config`, "", { retain: true });
 
       // Initial state from persisted disk state or active bridge
-      const isP2pOn = savedP2pState[device.did] || !!cameraData[idx].bridge;
+      const isP2pOn = cameraData[idx].policy.enabled && cameraData[idx].policy.p2pAllowed &&
+        (savedP2pState[device.did] || !!cameraData[idx].bridge);
       client.publish(
         `homeassistant/switch/${mqttDevice.id}/p2p_stream/state`,
         isP2pOn ? "ON" : "OFF",
@@ -724,6 +753,11 @@ async function executeCameraCommand(topic: string, msg: Buffer) {
     const snapshotUrlTopic = `homeassistant/sensor/${deviceId}/snapshot_url/state`;
     const talkbackRtmpTopic = `homeassistant/sensor/${deviceId}/talkback_rtmp/state`;
     if (value === "ON") {
+      if (!cameraInfo.policy.enabled || !cameraInfo.policy.p2pAllowed) {
+        console.warn(`[P2P Stream] Blocked by policy for ${cameraInfo.device.deviceName}; enable p2pAllowed explicitly`);
+        client.publish(p2pSwitchTopic, "OFF", { retain: true });
+        return;
+      }
       console.log(`🔌 [P2P Stream] Enabling P2P Stream for ${cameraInfo.device.deviceName}...`);
       await saveP2PState(cameraInfo.device.did, true);
       client.publish(p2pSwitchTopic, "ON", { retain: true });
@@ -758,6 +792,11 @@ async function executeCameraCommand(topic: string, msg: Buffer) {
       client.publish(snapshotUrlTopic, "null", { retain: true });
       client.publish(talkbackRtmpTopic, "null", { retain: true });
     }
+    return;
+  }
+
+  if (!cameraInfo.policy.enabled) {
+    console.warn(`[CameraPolicy] Ignoring command for disabled camera ${cameraInfo.device.deviceName}`);
     return;
   }
 
@@ -818,47 +857,80 @@ async function publishRTSPState(subjectId: string, cameraInfo: (typeof cameraDat
 }
 
 // === POLLING ===
-const pollingCameras = new Set<string>();
+// Three independent, per-camera gates: a slow camera never blocks another camera,
+// and failed cloud requests back off rather than spinning at a fixed rate.
+const attributeGates = new Map(
+  cameraData.map((cam) => [cam.device.did, new PollGate(cam.policy.attributeSeconds * 1000)]),
+);
+const eventGates = new Map(
+  cameraData.map((cam) => [cam.device.did, new PollGate(cam.policy.eventSeconds * 1000)]),
+);
+const historyGates = new Map(
+  cameraData.map((cam) => [cam.device.did, new PollGate(cam.policy.historySeconds * 1000)]),
+);
+
 function poll(): void {
   for (const cameraInfo of cameraData) {
-    const attrs = ENTITIES.filter((entity) =>
-      isEntitySupported(cameraInfo.device.model, entity.attr),
-    )
-      .map((entity) => entity.attr)
-      .concat(cameraInfo.hasSpotlight ? ["white_light_enable", "white_light_level"] : []);
+    if (!cameraInfo.policy.enabled) continue;
     const did = cameraInfo.device.did;
-    if (pollingCameras.has(did)) continue;
-    pollingCameras.add(did);
-    // One bounded poll per camera; an offline camera cannot pile up polls or block its peers.
+    const gate = attributeGates.get(did)!;
+    if (!gate.begin()) continue;
     void (async () => {
+      let successful = false;
       try {
+        const attrs = ENTITIES.filter((entity) =>
+          isEntitySupported(cameraInfo.device.model, entity.attr),
+        ).map((entity) => entity.attr)
+          .concat(cameraInfo.hasSpotlight ? ["white_light_enable", "white_light_level"] : []);
         const res = await queryAttrs(attrs, did);
+        if (res.code !== 0) throw new Error(`attribute query returned code ${res.code}`);
         for (const r of res.result || []) await publishAttr(r.attr, r.value, cameraInfo);
-        const events = await queryAttrs(EVENT_ATTRS, did);
-        if (events.code === 0)
-          processEventAttrs(client, cameraInfo.mqttDevice, events.result || []);
         await publishRTSPState(did, cameraInfo);
+        successful = true;
       } catch (error) {
         console.warn(
           `[Poll:${cameraInfo.device.deviceName}] ${error instanceof Error ? error.message : "Request failed"}`,
         );
       } finally {
-        pollingCameras.delete(did);
+        gate.finish(successful);
       }
     })();
   }
 }
 
-// History motion is polled independently so API delays cannot block video or normal controls.
+function pollMotionEvents(): void {
+  for (const cameraInfo of cameraData) {
+    if (!cameraInfo.policy.enabled ||
+        !["events", "both"].includes(cameraInfo.policy.motionMode)) continue;
+    const gate = eventGates.get(cameraInfo.device.did)!;
+    if (!gate.begin()) continue;
+    void (async () => {
+      let successful = false;
+      try {
+        const events = await queryAttrs(EVENT_ATTRS, cameraInfo.device.did);
+        if (events.code !== 0) throw new Error(`event query returned code ${events.code}`);
+        processEventAttrs(client, cameraInfo.mqttDevice, events.result || []);
+        successful = true;
+      } catch (error) {
+        console.warn(`[Events:${cameraInfo.device.deviceName}] ${error instanceof Error ? error.message : "Request failed"}`);
+      } finally {
+        gate.finish(successful);
+      }
+    })();
+  }
+}
+
 const motionHistoryTracker = new MotionHistoryTracker();
-const historyPolling = new Set<string>();
 const lastHistoryWarning = new Map<string, number>();
 function pollMotionHistory(): void {
   for (const cameraInfo of cameraData) {
+    if (!cameraInfo.policy.enabled ||
+        !["history", "both"].includes(cameraInfo.policy.motionMode)) continue;
     const did = cameraInfo.device.did;
-    if (historyPolling.has(did)) continue;
-    historyPolling.add(did);
+    const gate = historyGates.get(did)!;
+    if (!gate.begin()) continue;
     void (async () => {
+      let successful = false;
       try {
         const rows = await queryMotionHistory(did);
         const status = motionHistoryTracker.consume(cameraInfo.mqttDevice.id, rows);
@@ -870,6 +942,7 @@ function pollMotionHistory(): void {
         if (lastHistoryWarning.delete(did)) {
           console.info(`[MotionHistory:${cameraInfo.device.deviceName}] query recovered`);
         }
+        successful = true;
       } catch (error) {
         const now = Date.now();
         if (now - (lastHistoryWarning.get(did) ?? 0) >= 60_000) {
@@ -878,7 +951,7 @@ function pollMotionHistory(): void {
           console.warn(`[MotionHistory:${cameraInfo.device.deviceName}] query failed: ${errorMessage}`);
         }
       } finally {
-        historyPolling.delete(did);
+        gate.finish(successful);
       }
     })();
   }
@@ -1073,7 +1146,9 @@ const hausInventoryTimer = setInterval(() => {
   }
 }, 1000);
 hausInventoryTimer.unref();
-setInterval(poll, interval);
+setInterval(poll, 1000);
+setInterval(pollMotionEvents, 1000);
+setInterval(pollMotionHistory, 1000);
 poll();
-setInterval(pollMotionHistory, 3000);
+pollMotionEvents();
 pollMotionHistory();
